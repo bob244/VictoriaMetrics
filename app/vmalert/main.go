@@ -33,7 +33,7 @@ Examples:
  -rule="dir/*.yaml" -rule="/*.yaml". Relative path to all .yaml files in "dir" folder,
 absolute path to all .yaml files in root.
 Rule files may contain %{ENV_VAR} placeholders, which are substituted by the corresponding env vars.`)
-
+	ruleUrl            = flag.String("ruleurl", "http://localhost:9999", "The url to get remote rules  -- add by ZaTechOps")
 	httpListenAddr     = flag.String("httpListenAddr", ":8880", "Address to listen for http connections")
 	evaluationInterval = flag.Duration("evaluationInterval", time.Minute, "How often to evaluate the rules")
 
@@ -62,7 +62,7 @@ func main() {
 	if *dryRun {
 		u, _ := url.Parse("https://victoriametrics.com/")
 		notifier.InitTemplateFunc(u)
-		groups, err := config.Parse(*rulePath, true, true)
+		groups, err := config.Parse(*rulePath, *ruleUrl, true, true)
 		if err != nil {
 			logger.Fatalf(err.Error())
 		}
@@ -76,7 +76,7 @@ func main() {
 	if err != nil {
 		logger.Fatalf("failed to init: %s", err)
 	}
-	if err := manager.start(ctx, *rulePath, *validateTemplates, *validateExpressions); err != nil {
+	if err := manager.start(ctx, *rulePath, *ruleUrl, *validateTemplates, *validateExpressions); err != nil {
 		logger.Fatalf("failed to start: %s", err)
 	}
 
@@ -89,7 +89,7 @@ func main() {
 			<-sigHup
 			configReloads.Inc()
 			logger.Infof("SIGHUP received. Going to reload rules %q ...", *rulePath)
-			if err := manager.update(ctx, *rulePath, *validateTemplates, *validateExpressions, false); err != nil {
+			if err := manager.update(ctx, *rulePath, *ruleUrl, *validateTemplates, *validateExpressions, false); err != nil {
 				configReloadErrors.Inc()
 				configSuccess.Set(0)
 				logger.Errorf("error while reloading rules: %s", err)

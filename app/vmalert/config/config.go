@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"io/ioutil"
+	"net/http"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -215,7 +216,7 @@ func (r *Rule) Validate() error {
 }
 
 // Parse parses rule configs from given file patterns
-func Parse(pathPatterns []string, validateAnnotations, validateExpressions bool) ([]Group, error) {
+func Parse(pathPatterns []string, url string, validateAnnotations, validateExpressions bool) ([]Group, error) {
 	var fp []string
 	for _, pattern := range pathPatterns {
 		matches, err := filepath.Glob(pattern)
@@ -247,6 +248,26 @@ func Parse(pathPatterns []string, validateAnnotations, validateExpressions bool)
 			groups = append(groups, g)
 		}
 	}
+	//get rule from url
+	uniqueGroups := map[string]struct{}{}
+	gur, err := parseUrl(url)
+	if err != nil {
+		errGroup.Add(fmt.Errorf("failed to parse url %q: %w", url, err))
+	}
+	for _, g := range gur {
+		if err := g.Validate(validateAnnotations, validateExpressions); err != nil {
+			errGroup.Add(fmt.Errorf("invalid group %q in url %q: %w", g.Name, url, err))
+			continue
+		}
+		if _, ok := uniqueGroups[g.Name]; ok {
+			errGroup.Add(fmt.Errorf("group name %q duplicate in url %q", g.Name, url))
+			continue
+		}
+		uniqueGroups[g.Name] = struct{}{}
+		g.File = url
+		groups = append(groups, g)
+	}
+
 	if err := errGroup.Err(); err != nil {
 		return nil, err
 	}
@@ -260,6 +281,26 @@ func parseFile(path string) ([]Group, error) {
 	data, err := ioutil.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("error reading alert rule file: %w", err)
+	}
+	data = envtemplate.Replace(data)
+	g := struct {
+		Groups []Group `yaml:"groups"`
+		// Catches all undefined fields and must be empty after parsing.
+		XXX map[string]interface{} `yaml:",inline"`
+	}{}
+	err = yaml.Unmarshal(data, &g)
+	if err != nil {
+		return nil, err
+	}
+	return g.Groups, checkOverflow(g.XXX, "config")
+}
+
+func parseUrl(url string) ([]Group, error) {
+	res, _ := http.Get(url)
+	defer res.Body.Close()
+	data, err := ioutil.ReadAll(res.Body)
+	if err != nil {
+		return nil, fmt.Errorf("error reading alert rule url: %w", err)
 	}
 	data = envtemplate.Replace(data)
 	g := struct {
